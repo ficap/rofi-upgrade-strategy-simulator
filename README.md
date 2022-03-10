@@ -1,0 +1,1 @@
+# rofi-upgrade-strategy-simulator
