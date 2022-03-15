@@ -2,7 +2,7 @@ import asyncio
 import itertools
 
 from asyncio.queues import Queue
-from random import choices, randint
+from random import choices, randint, shuffle
 from typing import Dict, Optional, Union, Sequence
 
 from firmware import Firmware
@@ -26,12 +26,14 @@ class Device:
         self.new_firmware: Optional[Firmware] = new_firmware
         self.timeout: float = timeout
 
-        self.conn_perms = list(itertools.permutations(self.connections.values()))
+        # self.conn_perms = list(itertools.permutations(self.connections.values()))
+        self.shuffled_conns = list(self.connections.values())
 
         self.timeouts: int = 0
 
     def __str__(self):
-        return f"idx: {self.idx}, upgrading: {self.is_upgrading()}, type: {self.dev_type}, " \
+        return f"idx: {self.idx:02d}, upgrading: {self.is_upgrading():d}, type: {self.dev_type}, " \
+               f"in_queue: {self.input_queue.qsize():02d}, " \
                f"running_fw: {self.running_firmware}, new_fw: {self.new_firmware}"
 
     async def send_message(self, queue: Queue, msg: Union[AnnounceMsg, RequestMsg, DataMsg]):
@@ -117,7 +119,8 @@ class Device:
                 if self.new_firmware.is_valid_chunk_id(msg.chunk_id) and not self.new_firmware.is_chunk_present(msg.chunk_id):
                     self.new_firmware.data[msg.chunk_id] = msg.data
 
-                    for q in random_entry(self.conn_perms):
+                    shuffle(self.shuffled_conns)
+                    for q in self.shuffled_conns:
                         await self.send_message(q,
                                                 AnnounceMsg(self.idx, msg.fw_type, msg.version,
                                                             msg.chunk_id, msg.num_of_chunks))

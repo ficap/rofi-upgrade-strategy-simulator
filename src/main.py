@@ -1,10 +1,12 @@
 import asyncio
+import time
+
 import networkx as nx
 
 from asyncio import Queue
 
 from firmware import Firmware, FW_TYPE_A
-from client import client, watcher
+from client import client, watcher, all_devices_pass
 from device import Device
 
 # TODO: implement handling of different fw_types
@@ -28,9 +30,13 @@ async def main():
         for i in range(1, len(net))
     ]
 
-    coros = [d.loop() for d in devices] + [client(devices), watcher(0.5, devices)]
-    
-    await asyncio.gather(*coros)
+    coros = [d.loop() for d in devices] + [client(devices), watcher(0.1, devices), all_devices_pass(devices, 0.1, lambda x: x.running_firmware.version == 2)]
+
+    await asyncio.wait(coros, return_when=asyncio.FIRST_COMPLETED)
 
 
+start = time.time_ns()
 asyncio.run(main())
+took = time.time_ns() - start
+took = took / 1000_000_000
+print(f"it took {took} seconds in realtime")
