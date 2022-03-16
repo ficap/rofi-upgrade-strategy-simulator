@@ -1,5 +1,4 @@
 import asyncio
-import itertools
 
 from asyncio.queues import Queue
 from random import choices, randint, shuffle
@@ -8,8 +7,6 @@ from typing import Dict, Optional, Union, Sequence
 from firmware import Firmware
 from messages import AnnounceMsg, RequestMsg, DataMsg
 
-MSG_SUCCESS_RATE = .9
-
 
 def random_entry(seq: Sequence):
     return seq[randint(0, len(seq) - 1)]
@@ -17,7 +14,8 @@ def random_entry(seq: Sequence):
 
 class Device:
     def __init__(self, idx: int, dev_type: int, input_queue: Queue, connections: Dict[int, Queue],
-                 running_firmware: Firmware, new_firmware: Optional[Firmware] = None, timeout: float = 0.25):
+                 running_firmware: Firmware, new_firmware: Optional[Firmware] = None, timeout: float = 0.25,
+                 msg_success_rate: float = 1.0):
         self.idx: int = idx
         self.dev_type: int = dev_type
         self.input_queue: Queue = input_queue
@@ -25,6 +23,8 @@ class Device:
         self.running_firmware: Firmware = running_firmware
         self.new_firmware: Optional[Firmware] = new_firmware
         self.timeout: float = timeout
+        self.msg_success_rate: float = msg_success_rate
+        self.cache = []
 
         # self.conn_perms = list(itertools.permutations(self.connections.values()))
         self.shuffled_conns = list(self.connections.values())
@@ -37,29 +37,25 @@ class Device:
                f"running_fw: {self.running_firmware}, new_fw: {self.new_firmware}"
 
     async def send_message(self, queue: Queue, msg: Union[AnnounceMsg, RequestMsg, DataMsg]):
-        success = choices([True, False], [MSG_SUCCESS_RATE, 1.0 - MSG_SUCCESS_RATE], k=1)[0]
+        # print(f"Sending {msg}")
+        await queue.put(msg)
 
-        # global messages_succ
-        # global messages_lost
+    async def receive_message(self):
+        while True:
+            msg = await asyncio.wait_for(self.input_queue.get(), self.timeout)
+            success = choices([True, False], [self.msg_success_rate, 1.0 - self.msg_success_rate], k=1)[0]
 
-        if success:
-            # print(f"Sending {msg}")
-            await queue.put(msg)
-
-            # messages_succ += 1
-            # print(f"successful messages: {messages_succ}/{messages_succ + messages_lost}")
-        else:
-            pass
-            # print(f"Loosing {msg}")
-            # messages_lost += 1
-            # print(f"failed messages: {messages_lost}")
+            if success:
+                return msg
 
     def is_upgrading(self) -> bool:
         return self.new_firmware is not None
 
     async def _handle_announce_msg(self, msg: AnnounceMsg) -> None:
         if msg.fw_type != self.dev_type:
-            # todo: broadcast it? can lead to message looping in the network
+            # todo: if chunk is not in cache
+            await self.send_message(self.connections[msg.from_node],
+                                    RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id))
             return
 
         if msg.version > self.running_firmware.version:
@@ -114,6 +110,12 @@ class Device:
             pass
 
     async def _handle_data_msg(self, msg: DataMsg) -> None:
+        if msg.fw_type != self.dev_type:
+            # todo: if not in cache
+            self.cache.append(msg)
+            # todo: announce
+            return
+
         if self.is_upgrading():
             if msg.version == self.new_firmware.version and msg.fw_type == self.new_firmware.fw_type:  # todo: check num_of_chunks
                 if self.new_firmware.is_valid_chunk_id(msg.chunk_id) and not self.new_firmware.is_chunk_present(msg.chunk_id):
@@ -161,7 +163,7 @@ class Device:
 
         while True:
             try:
-                msg = await asyncio.wait_for(self.input_queue.get(), self.timeout)
+                msg = await self.receive_message()
                 if isinstance(msg, AnnounceMsg):
                     await self._handle_announce_msg(msg)
 
