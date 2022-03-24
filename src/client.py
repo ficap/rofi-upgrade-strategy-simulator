@@ -57,6 +57,8 @@ async def all_devices_pass(devices: List[Device], period: float, predicate: Call
             print("all devices passed")
             took = time.time_ns() - start
             took = took / 1000_000_000
+            for device in devices:
+                device.kill()
             print(f"it took {took} seconds")
             return True
 

@@ -30,6 +30,7 @@ class Device:
         self.shuffled_conns = list(self.connections.values())
 
         self.timeouts: int = 0
+        self.killed: bool = False
 
     def __str__(self):
         return f"idx: {self.idx:02d}, upgrading: {self.is_upgrading():d}, type: {self.dev_type}, " \
@@ -161,7 +162,7 @@ class Device:
                             randint(0, self.running_firmware.data_size - 1), self.running_firmware.data_size)
             )
 
-        while True:
+        while not self.killed:
             try:
                 msg = await self.receive_message()
                 if isinstance(msg, AnnounceMsg):
@@ -175,3 +176,6 @@ class Device:
 
             except asyncio.TimeoutError:
                 await self._handle_timeout()
+
+    def kill(self):
+        self.killed = True
