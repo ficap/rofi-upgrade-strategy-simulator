@@ -1,6 +1,5 @@
 import asyncio
 import sys
-import time
 from typing import List, Callable
 
 from device import Device
@@ -26,17 +25,14 @@ async def connect_stdin():
     return reader  # , writer
 
 
-async def watcher(period: float, devices: List[Device]):
-    while True:
-        msgs_in_queues = 0
-        print("\033[H\033[J", end="")
-        for d in devices:
-            print(d)
-            msgs_in_queues += d.input_queue.qsize()
-        print(f"in queues: {msgs_in_queues}")
-        print()
-
-        await asyncio.sleep(period)
+def watcher(devices: List[Device]):
+    msgs_in_queues = 0
+    print("\033[H\033[J", end="")
+    for d in devices:
+        print(d)
+        msgs_in_queues += d.input_queue.size()
+    print(f"in queues: {msgs_in_queues}")
+    print()
 
 
 async def client(devices: List[Device]):
@@ -44,22 +40,10 @@ async def client(devices: List[Device]):
     await cmd_handler(sin, devices)
 
 
-async def all_devices_pass(devices: List[Device], period: float, predicate: Callable[[Device], bool]):
-    start = time.time_ns()
-    while True:
-        fail = False
-        # let's check all of them so that each run takes similar time
-        for d in devices:
-            if not predicate(d):
-                fail = True
+def all_devices_pass(devices: List[Device], predicate: Callable[[Device], bool]):
+    for d in devices:
+        if not predicate(d):
+            return False
 
-        if not fail:
-            print("all devices passed")
-            took = time.time_ns() - start
-            took = took / 1000_000_000
-            for device in devices:
-                device.kill()
-            print(f"it took {took} seconds")
-            return True
+    return True
 
-        await asyncio.sleep(period)
