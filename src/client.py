@@ -40,7 +40,7 @@ async def client(devices: List[Device]):
     await cmd_handler(sin, devices)
 
 
-def all_devices_pass(devices: List[Device], predicate: Callable[[Device], bool]):
+def all_devices_pass(devices: List[Device], predicate: Callable[[Device], bool]) -> bool:
     for d in devices:
         if not predicate(d):
             return False

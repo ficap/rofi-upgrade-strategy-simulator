@@ -16,13 +16,15 @@ class Simulator:
 
         while self.tick != ticks:
 #             watcher(self.devices)
+#             sleep(0.2)
+
+            for device in self.devices:
+                device.tick(self.tick)
+
             if stop_condition(self.devices):
 #                 for dev in self.devices:
 #                     print(dev.input_queue)
                 return
-
-            for device in self.devices:
-                device.tick(self.tick)
 
             self.tick += 1
 

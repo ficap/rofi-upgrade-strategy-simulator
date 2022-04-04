@@ -151,29 +151,36 @@ class Device:
             self.send_message(random_entry(list(self.connections.values())),
                               RequestMsg(self.idx, self.dev_type, self.new_firmware.version, req_chunk_id))
 
+        else:
+            self.send_message(random_entry(list(self.connections.values())),
+                              AnnounceMsg(self.idx, self.dev_type, self.running_firmware.version, 0, self.running_firmware.data_size))
+
     def tick(self, time):
         self.last_observed_time = time
-        for _, queue in self.connections.items():
-            # I have whole firmware and I announce random part of it
-            self.send_message(
-                queue,
-                AnnounceMsg(self.idx, self.running_firmware.fw_type, self.running_firmware.version,
-                            randint(0, self.running_firmware.data_size - 1), self.running_firmware.data_size)
-            )
+        if self.last_observed_time == 0:
+            for _, queue in self.connections.items():
+                # I have whole firmware and I announce random part of it
+                self.send_message(
+                    queue,
+                    AnnounceMsg(self.idx, self.running_firmware.fw_type, self.running_firmware.version,
+                                randint(0, self.running_firmware.data_size - 1), self.running_firmware.data_size)
+                )
+            return
 
-            msg = self.receive_message()
-            if isinstance(msg, AnnounceMsg):
-                self._handle_announce_msg(msg)
+        msg = self.receive_message()
+        if isinstance(msg, AnnounceMsg):
+            self._handle_announce_msg(msg)
+            self.last_message_at = self.last_observed_time
+
+        elif isinstance(msg, RequestMsg):
+            self._handle_request_msg(msg)
+            self.last_message_at = self.last_observed_time
+
+        elif isinstance(msg, DataMsg):
+            self._handle_data_msg(msg)
+            self.last_message_at = self.last_observed_time
+
+        else:
+            if self.last_observed_time - self.last_message_at >= self.timeout:
+                self._handle_timeout()
                 self.last_message_at = self.last_observed_time
-
-            elif isinstance(msg, RequestMsg):
-                self._handle_request_msg(msg)
-                self.last_message_at = self.last_observed_time
-
-            elif isinstance(msg, DataMsg):
-                self._handle_data_msg(msg)
-                self.last_message_at = self.last_observed_time
-
-            else:
-                if self.last_observed_time - self.last_message_at >= self.timeout:
-                    self._handle_timeout()
