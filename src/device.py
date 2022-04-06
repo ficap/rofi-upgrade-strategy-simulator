@@ -23,7 +23,7 @@ class Device:
         self.timeout: int = timeout
         self.cache = []
         self.last_observed_time: int = -1
-        self.last_message_at: int = -1
+        self.last_action_at: int = -1
 
         # self.conn_perms = list(itertools.permutations(self.connections.values()))
         self.shuffled_conns = list(self.connections.values())
@@ -143,7 +143,8 @@ class Device:
         if self.is_upgrading() and not self.new_firmware.is_complete():
             # for now let's request first missing chunk from random neighbor
             missing_chunks = self.new_firmware.get_missing_chunks()
-            req_chunk_id = random_entry(missing_chunks)
+            # always take the first missing chunk otherwise it might not converge and may congest the network
+            req_chunk_id = missing_chunks[0]
 
             self.timeouts += 1
 
@@ -152,35 +153,38 @@ class Device:
                               RequestMsg(self.idx, self.dev_type, self.new_firmware.version, req_chunk_id))
 
         else:
+            # when we are not upgrading let's sometimes announce our firmware version which may bootstrap upgrade process
             self.send_message(random_entry(list(self.connections.values())),
                               AnnounceMsg(self.idx, self.dev_type, self.running_firmware.version, 0, self.running_firmware.data_size))
 
     def tick(self, time):
         self.last_observed_time = time
-        if self.last_observed_time == 0:
-            for _, queue in self.connections.items():
-                # I have whole firmware and I announce random part of it
-                self.send_message(
-                    queue,
-                    AnnounceMsg(self.idx, self.running_firmware.fw_type, self.running_firmware.version,
-                                randint(0, self.running_firmware.data_size - 1), self.running_firmware.data_size)
-                )
-            return
+
+        # this is no more necessarily needed because the upgrade process can be started by _handle_timeout
+        # if self.last_observed_time == 0:
+        #     for _, queue in self.connections.items():
+        #         # I have whole firmware and I announce random part of it
+        #         self.send_message(
+        #             queue,
+        #             AnnounceMsg(self.idx, self.running_firmware.fw_type, self.running_firmware.version,
+        #                         randint(0, self.running_firmware.data_size - 1), self.running_firmware.data_size)
+        #         )
+        #     return
 
         msg = self.receive_message()
         if isinstance(msg, AnnounceMsg):
             self._handle_announce_msg(msg)
-            self.last_message_at = self.last_observed_time
+            self.last_action_at = self.last_observed_time
 
         elif isinstance(msg, RequestMsg):
             self._handle_request_msg(msg)
-            self.last_message_at = self.last_observed_time
+            self.last_action_at = self.last_observed_time
 
         elif isinstance(msg, DataMsg):
             self._handle_data_msg(msg)
-            self.last_message_at = self.last_observed_time
+            self.last_action_at = self.last_observed_time
 
         else:
-            if self.last_observed_time - self.last_message_at >= self.timeout:
+            if self.last_observed_time - self.last_action_at >= self.timeout:
                 self._handle_timeout()
-                self.last_message_at = self.last_observed_time
+                self.last_action_at = self.last_observed_time
