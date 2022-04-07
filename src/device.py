@@ -12,7 +12,8 @@ def random_entry(seq: Sequence):
 
 class Device:
     def __init__(self, idx: int, dev_type: int, input_queue: Queue, connections: Dict[int, Queue],
-                 running_firmware: Firmware, new_firmware: Optional[Firmware] = None, msg_success_rate: float = 1.0, timeout: int = 5):
+                 running_firmware: Firmware, new_firmware: Optional[Firmware] = None, msg_success_rate: float = 1.0,
+                 timeout: int = 5, different_fw_type_cache_size: int = 5):
         self.idx: int = idx
         self.dev_type: int = dev_type
         self.input_queue: Queue = input_queue
@@ -21,7 +22,13 @@ class Device:
         self.new_firmware: Optional[Firmware] = new_firmware
         self.msg_success_rate: float = msg_success_rate
         self.timeout: int = timeout
-        self.cache = []
+
+        self.different_fw_type_cache_size: int = different_fw_type_cache_size
+
+        self.data_cache = []  # todo: implement LRU eviction
+        self.announce_msgs_bitmasks = {}
+        self.request_msgs_bitmasks = {}
+
         self.last_observed_time: int = -1
         self.last_action_at: int = -1
 
@@ -111,7 +118,7 @@ class Device:
     def _handle_data_msg(self, msg: DataMsg) -> None:
         if msg.fw_type != self.dev_type:
             # todo: if not in cache
-            self.cache.append(msg)
+            self.data_cache.append(msg)
             # todo: announce
             return
 
