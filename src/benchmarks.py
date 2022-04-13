@@ -1,72 +1,15 @@
 from time import time
-from typing import Callable, Optional, List, Tuple
+from typing import List, Tuple
 
 import networkx as nx
 import matplotlib.pyplot as plt
 
-from iqueue import Queue
-
-from firmware import Firmware, FW_TYPE_A, FW_TYPE_B
-from client import client, watcher, all_devices_pass
-from device import Device
 from simulator import Simulator
+from utils import build_network, general_stopping_condition
 
 
 class NoMoreMessagesError(BaseException):
     pass
-
-
-def device_has_fw_ver(version: int, dev_type: Optional[int] = None) -> Callable[[Device], bool]:
-    def _device_has_fw_ver(device: Device) -> bool:
-        if dev_type is not None and device.dev_type != dev_type:
-            return True
-        return device.running_firmware.version == version
-
-    return _device_has_fw_ver
-
-
-def no_messages_in_queue(dev_type: Optional[int] = None) -> Callable[[Device], bool]:
-    def _no_messages_in_queue(device: Device) -> bool:
-        if dev_type is not None and device.dev_type != dev_type:
-            return True
-        return device.input_queue.size() == 0
-
-    return _no_messages_in_queue
-
-
-def build_network(net: nx.Graph = nx.barbell_graph(5, 5), msg_success_rate: float = 1.):
-    vertices = {v: k for k, v in enumerate(list(net.nodes))}
-    net = net.adjacency()
-    net = dict(list(map(lambda x: (vertices[x[0]], list(map(lambda y: vertices[y], x[1]))), net)))
-
-    queues = [Queue() for _ in range(len(net))]
-    devices = [
-        Device(i, FW_TYPE_A, queues[i],
-               {k: queues[k] for k in net[i]},
-               Firmware(FW_TYPE_A, 2, list(range(0, 20, 2))), msg_success_rate=msg_success_rate)
-        for i in [0]
-    ] + [
-        Device(i, FW_TYPE_A, queues[i],
-               {k: queues[k] for k in net[i]},
-               Firmware(FW_TYPE_A, 1, list(range(10))), msg_success_rate=msg_success_rate)
-        for i in range(1, len(net)-1)
-    ] + [
-        Device(i, FW_TYPE_A, queues[i],
-               {k: queues[k] for k in net[i]},
-               Firmware(FW_TYPE_A, 1, list(range(0, 10, 1))), msg_success_rate=msg_success_rate)
-        for i in [len(net)-1]
-    ]
-
-    return devices
-
-
-def general_stopping_condition(devs: List[Device]) -> bool:
-#     no_messages = all_devices_pass(devs, no_messages_in_queue())
-    fw_ver = all_devices_pass(devs, device_has_fw_ver(2))
-
-#     if not fw_ver and no_messages:
-#         raise NoMoreMessagesError()
-    return fw_ver
 
 
 def make_graph(title: str, data: List[Tuple[str, List[float], List[float]]], xlabel: str, ylabel: str, filename: str, show: bool):
@@ -96,7 +39,7 @@ def network_settling_time_vs_msg_succ_rate(network, rate_from: int, rate_to: int
         ticks = 0
         fails = 0
         for sample in range(samples):
-            devices = build_network(net=network, msg_success_rate=succ_rate)
+            devices = build_network(net=network, default_msg_success_rate=succ_rate)
             
             simulator = Simulator(devices)
             try:

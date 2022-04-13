@@ -2,7 +2,7 @@ from typing import List, Optional
 from time import sleep
 
 from device import Device
-from client import watcher
+from utils import watcher
 
 
 class Simulator:
@@ -15,8 +15,8 @@ class Simulator:
         stop_condition = stop_condition or (lambda _: False)
 
         while self.tick != ticks:
-#             watcher(self.devices)
-#             sleep(0.2)
+            watcher(self.devices)
+            sleep(0.2)
 
             for device in self.devices:
                 device.tick(self.tick)
