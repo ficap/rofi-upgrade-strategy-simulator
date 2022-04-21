@@ -71,12 +71,12 @@ def all_devices_pass(devices: List[Device], predicate: Callable[[Device], bool])
 
 
 def general_stopping_condition(devs: List[Device]) -> bool:
-    no_messages = all_devices_pass(devs, no_messages_in_queue())
+    # no_messages = all_devices_pass(devs, no_messages_in_queue())
     fw_ver = all_devices_pass(devs, device_has_fw_ver(2))
 
     #     if not fw_ver and no_messages:
     #         raise NoMoreMessagesError()
-    return fw_ver and no_messages
+    return fw_ver# and no_messages
 
 
 def watcher(devices: List[Device]):

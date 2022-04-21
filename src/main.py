@@ -15,11 +15,17 @@ from benchmarks import benchmark_settling_time_vs_network_size_vs_succ_rate, ben
 # benchmark_msg_succ_rate_vs_time(nx.complete_graph(5), 50, 100, 1, 1000, "complete_graph(5)")
 # benchmark_msg_succ_rate_vs_time(nx.barbell_graph(5, 5), 50, 100, 1, 100, "barbell_graph(5,5)")
 
-graph: nx.Graph = nx.barbell_graph(5, 5)
-graph.nodes[0]["running_firmware"] = Firmware(FW_TYPE_A, 2, [2*i for i in range(10)])
-graph.nodes[1]["running_firmware"] = Firmware(FW_TYPE_B, 2, [100 + 2*i for i in range(10)])
-graph.nodes[len(graph.nodes)-1]["running_firmware"] = Firmware(FW_TYPE_B, 1, [100 + i for i in range(10)])
-net = build_network(graph)
+# graph: nx.Graph = nx.barbell_graph(5, 5)
+# graph.nodes[0]["running_firmware"] = Firmware(FW_TYPE_A, 2, [2*i for i in range(10)])
+# graph.nodes[1]["running_firmware"] = Firmware(FW_TYPE_B, 2, [100 + 2*i for i in range(10)])
+# graph.nodes[len(graph.nodes)-1]["running_firmware"] = Firmware(FW_TYPE_B, 1, [100 + i for i in range(10)])
+
+graph: nx.Graph = nx.grid_2d_graph(7, 7)
+graph.nodes[(0, 0)]["running_firmware"] = Firmware(FW_TYPE_A, 2, [2*i for i in range(10)])
+graph.nodes[(6, 0)]["running_firmware"] = Firmware(FW_TYPE_B, 2, [100 + 2*i for i in range(10)])
+graph.nodes[(6, 6)]["running_firmware"] = Firmware(FW_TYPE_B, 1, [100 + i for i in range(10)])
+
+net = build_network(graph, default_msg_success_rate = 0.9)
 simulator = Simulator(net)
 
 simulator.run(stop_condition=general_stopping_condition)

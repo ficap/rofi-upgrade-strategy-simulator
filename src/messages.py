@@ -8,7 +8,7 @@ class AnnounceMsg:
     version: int
     chunk_id: int
     num_of_chunks: int
-    hops: int
+    seq: int
 
 
 @dataclass
@@ -18,7 +18,7 @@ class RequestMsg:
     version: int
     chunk_id: int
     num_of_chunks: int
-    ttl: int
+    seq: int
 
 
 @dataclass
@@ -30,3 +30,4 @@ class DataMsg:
     num_of_chunks: int
     chunk_length: int
     data: int
+    seq: int

@@ -25,10 +25,8 @@ class Device:
 
         self.different_fw_type_cache_size: int = different_fw_type_cache_size
 
-        self.bitmasks_timeout = 100  # todo: implement and think about case when network is not faulty and is big enough
-        self.data_cache = {}
-        self.announce_msgs_bitmasks = {}
-        self.request_msgs_bitmasks = {}
+        self.seen_messages = {}
+        self.last_seen_seq = 0
 
         self.last_observed_time: int = -1
         self.last_action_at: int = -1
@@ -41,8 +39,7 @@ class Device:
     def __str__(self):
         return f"idx: {self.idx:02d}, upgrading: {self.is_upgrading():d}, type: {self.dev_type}, " \
                f"in_queue: {self.input_queue.size():02d}, " \
-               f"running_fw: {self.running_firmware}, new_fw: {self.new_firmware}, data_cache: {self.data_cache}," \
-               f"ann: {self.announce_msgs_bitmasks}, req: {self.request_msgs_bitmasks}"
+               f"running_fw: {self.running_firmware}, new_fw: {self.new_firmware}, seen_size: {len(self.seen_messages)}"
 
     def send_message(self, queue: Queue, msg: Union[AnnounceMsg, RequestMsg, DataMsg]):
         # print(f"Sending {msg}")
@@ -64,48 +61,28 @@ class Device:
         for q in self.shuffled_conns:
             self.send_message(q, msg)
 
-    def _seen_message(self, msg: Union[AnnounceMsg, RequestMsg]):
-        if isinstance(msg, AnnounceMsg):
-            bitmasks = self.announce_msgs_bitmasks
-        elif isinstance(msg, RequestMsg):
-            bitmasks = self.request_msgs_bitmasks
-        else:
-            return False
+    def _seen_message(self, msg: Union[AnnounceMsg, RequestMsg, DataMsg]) -> bool:
+        desc = (type(msg), msg.fw_type, msg.chunk_id)
+        if desc in self.seen_messages:
+            fw_version, seq = self.seen_messages[desc]
+            if msg.version == fw_version and msg.seq > seq:
+                return False
 
-        if (msg.fw_type, msg.version) not in bitmasks:
-            return False
+            if msg.version > fw_version:
+                return False
 
-        return bitmasks[(msg.fw_type, msg.version)][msg.chunk_id]
+            return True
 
-    def _mark_seen(self, msg: Union[AnnounceMsg, RequestMsg]):
-        if isinstance(msg, AnnounceMsg):
-            bitmasks = self.announce_msgs_bitmasks
-        elif isinstance(msg, RequestMsg):
-            bitmasks = self.request_msgs_bitmasks
-        else:
-            return
+        return False
 
-        bitmask = bitmasks.get((msg.fw_type, msg.version), [False for _ in range(msg.num_of_chunks)])
-        bitmask[msg.chunk_id] = True
-        bitmasks[(msg.fw_type, msg.version)] = bitmask
-
-    def _put_to_cache(self, key, value) -> bool:
-        if len(self.data_cache) >= self.different_fw_type_cache_size:
-            # todo: do LRU cache eviction
-            pass
-
-        # let's assume that the data for the same key are the same as well
-        if key in self.data_cache:
-            return False
-
-        self.data_cache[key] = value
-        return True
+    def _mark_seen(self, msg: Union[AnnounceMsg, RequestMsg, DataMsg]):
+        self.seen_messages[(type(msg), msg.fw_type, msg.chunk_id)] = (msg.version, msg.seq)
+        self.last_seen_seq = max(self.last_seen_seq, msg.seq)
 
     def _handle_announce_msg(self, msg: AnnounceMsg) -> None:
         if msg.fw_type != self.dev_type:
-            # todo: do timeouts and cache evictions
             if not self._seen_message(msg):
-                self._broadcast_message(AnnounceMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.hops + 1))
+                self._broadcast_message(AnnounceMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.seq))
                 self._mark_seen(msg)
             return
 
@@ -114,11 +91,11 @@ class Device:
                 # print(f"{self.idx}: beginning upgrade to version {msg.version}")
                 # todo: instead of line below use stg. like _begin_upgrade(1, msg.version, msg.num_of_chunks)
                 self.new_firmware = Firmware(msg.fw_type, msg.version, msg.num_of_chunks * [None])  # todo: handle firmware types
-                self.send_message(self.connections[msg.from_node], RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.hops))
+                self.send_message(self.connections[msg.from_node], RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.seq + 1))
 
             elif self.is_upgrading() and self.new_firmware.version == msg.version:  # we're already in transition to this new version
                 if not self.new_firmware.is_chunk_present(msg.chunk_id):  # we don't have this chunk yet
-                    self.send_message(self.connections[msg.from_node], RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.hops))
+                    self.send_message(self.connections[msg.from_node], RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.seq + 1))
 
                 else:  # we already have this chunk do we want to continue in announcing this chunk?
                     pass  # not yet it might not be needed to generate additional traffic
@@ -134,23 +111,9 @@ class Device:
 
     def _handle_request_msg(self, msg: RequestMsg) -> None:
         if msg.fw_type != self.dev_type:
-            if (msg.fw_type, msg.version, msg.chunk_id) in self.data_cache:
-                self.send_message(
-                    self.connections[msg.from_node],
-                    DataMsg(
-                        self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, 1,
-                        self.data_cache[(msg.fw_type, msg.version, msg.chunk_id)]
-                    )
-                )
-                return
-
-            # todo: do timeouts and cache evictions
             if not self._seen_message(msg):
-                if msg.ttl > 0:
-                    self._broadcast_message(RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.ttl - 1))
-                else:
-                    self._mark_seen(msg)
-
+                self._broadcast_message(RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.seq))
+                self._mark_seen(msg)
             return
 
         # should total number of chunks of firmware be sent as well to prevent useless data packets transfer?
@@ -159,7 +122,7 @@ class Device:
                 self.send_message(self.connections[msg.from_node],
                                   DataMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id,
                                           self.running_firmware.data_size, 1,
-                                          self.running_firmware.data[msg.chunk_id]))
+                                          self.running_firmware.data[msg.chunk_id], msg.seq + 1))
             else:  # it's not a valid request
                 pass
 
@@ -169,23 +132,22 @@ class Device:
                 self.send_message(self.connections[msg.from_node],
                                   DataMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id,
                                           self.new_firmware.data_size, 1,
-                                          self.new_firmware.data[msg.chunk_id]))
+                                          self.new_firmware.data[msg.chunk_id], msg.seq + 1))
 
             else:  # we don't have requested data
                 if self.new_firmware.is_valid_chunk_id(msg.chunk_id):
                     # request chunk from random neighbor
                     self.send_message(random_entry(list(self.connections.values())),
-                                      RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.ttl - 1))
+                                      RequestMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.seq))  # todo: increase seq?
 
         else:  # todo: request data it might be different type of firmware
             pass
 
     def _handle_data_msg(self, msg: DataMsg) -> None:
         if msg.fw_type != self.dev_type:
-            cache_changed = self._put_to_cache((msg.fw_type, msg.version, msg.chunk_id), msg.data)
-            if cache_changed:
-                self._broadcast_message(AnnounceMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, 1))
-            return
+            if not self._seen_message(msg):
+                self._broadcast_message(DataMsg(self.idx, msg.fw_type, msg.version, msg.chunk_id, msg.num_of_chunks, msg.chunk_length, msg.data, msg.seq))
+                self._mark_seen(msg)
 
         if self.is_upgrading():
             if msg.version == self.new_firmware.version and msg.fw_type == self.new_firmware.fw_type:  # todo: check num_of_chunks
@@ -196,7 +158,7 @@ class Device:
                     for q in self.shuffled_conns:
                         self.send_message(q,
                                           AnnounceMsg(self.idx, msg.fw_type, msg.version,
-                                                      msg.chunk_id, msg.num_of_chunks, 1))
+                                                      msg.chunk_id, msg.num_of_chunks, msg.seq + 1))
 
                     if self.new_firmware.is_complete():
                         # we have all data
@@ -215,19 +177,18 @@ class Device:
         if self.is_upgrading() and not self.new_firmware.is_complete():
             # for now let's request first missing chunk from random neighbor
             missing_chunks = self.new_firmware.get_missing_chunks()
-            # always take the first missing chunk otherwise it might not converge and may congest the network
-            req_chunk_id = missing_chunks[0]
+            req_chunk_id = random_entry(missing_chunks)
 
             self.timeouts += 1
 
             # print(f"{self.idx} timeout {self.timeouts}")
             self.send_message(random_entry(list(self.connections.values())),
-                              RequestMsg(self.idx, self.dev_type, self.new_firmware.version, req_chunk_id, self.new_firmware.data_size, 10))
+                              RequestMsg(self.idx, self.dev_type, self.new_firmware.version, req_chunk_id, self.new_firmware.data_size, self.last_seen_seq + 1))
 
         else:
             # when we are not upgrading let's sometimes announce our firmware version which may bootstrap upgrade process
             self.send_message(random_entry(list(self.connections.values())),
-                              AnnounceMsg(self.idx, self.dev_type, self.running_firmware.version, 0, self.running_firmware.data_size, 1))
+                              AnnounceMsg(self.idx, self.dev_type, self.running_firmware.version, 0, self.running_firmware.data_size, self.last_seen_seq + 1))
 
     def tick(self, time):
         self.last_observed_time = time
